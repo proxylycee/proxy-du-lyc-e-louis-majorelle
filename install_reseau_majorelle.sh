@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.15.3"   # ← changer uniquement ici pour toute la version
+VERSION="0.16.1"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -254,7 +254,7 @@ echo "→ Génération de l'application..."
 cat > "$APP_FILE" <<PYEOF
 #!/usr/bin/env python3
 # ═══════════════════════════════════════════════════════════════════
-#  Réseau Louis Majorelle v0.12.0
+#  Réseau Louis Majorelle v0.16.1
 # ═══════════════════════════════════════════════════════════════════
 
 import gi
@@ -289,7 +289,7 @@ from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
 if HAS_VTE:
     from gi.repository import Vte
 
-import subprocess, os, re, json, shutil, glob, time, math
+import subprocess, os, re, json, shutil, glob, time, math, urllib.request, threading
 try:
     import cairo as _cairo_mod
     HAS_CAIRO = True
@@ -1325,6 +1325,50 @@ def scan_system_desktops():
     return results
 
 # ═══════════════════════════════════════════════════════════════════
+#  VÉRIFICATION DE VERSION GitHub
+# ═══════════════════════════════════════════════════════════════════
+def check_version_github():
+    """Vérifier s'il y a une nouvelle version disponible sur GitHub"""
+    try:
+        # Récupère les dernières releases depuis l'API GitHub
+        url = "https://api.github.com/repos/proxylycee/proxy-du-lyc-e-louis-majorelle/releases/latest"
+        req = urllib.request.Request(url, headers={'Accept': 'application/vnd.github.v3+json'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            latest_version = data.get('tag_name', '').lstrip('v')  # Récupère et nettoie le tag
+            
+            if latest_version and latest_version != APP_VERSION:
+                log(f"Nouvelle version disponible: v{latest_version} (actuelle: v{APP_VERSION})")
+                return latest_version
+    except Exception as e:
+        log(f"Impossible de vérifier la version GitHub: {e}", "debug")
+    return None
+
+def show_update_dialog(parent, latest_version):
+    """Affiche une boîte de dialogue pour notifier une nouvelle version"""
+    dialog = Gtk.MessageDialog(
+        parent=parent,
+        flags=Gtk.DialogFlags.MODAL,
+        message_type=Gtk.MessageType.INFO,
+        buttons=Gtk.ButtonsType.OK_CANCEL,
+        text="Nouvelle version disponible"
+    )
+    dialog.format_secondary_text(
+        f"Une nouvelle version (v{latest_version}) est disponible.\n\n"
+        f"Version actuelle: v{APP_VERSION}\n\n"
+        "Vous pouvez la télécharger depuis:\n"
+        "https://github.com/proxylycee/proxy-du-lyc-e-louis-majorelle/releases"
+    )
+    dialog.set_title("Mise à jour disponible")
+    response = dialog.run()
+    if response == Gtk.ResponseType.OK:
+        # Optionnel: ouvrir le lien
+        try:
+            subprocess.Popen(['xdg-open', 'https://github.com/proxylycee/proxy-du-lyc-e-louis-majorelle/releases'])
+        except: pass
+    dialog.destroy()
+
+# ═══════════════════════════════════════════════════════════════════
 #  INTERFACE
 # ═══════════════════════════════════════════════════════════════════
 class App(Gtk.Window):
@@ -1346,6 +1390,15 @@ class App(Gtk.Window):
         # Fermer = masquer dans le tray si activé, sinon quitter
         self.connect("delete-event", self._on_delete)
         apply_css(CFG)
+
+        # Vérifier les mises à jour en arrière-plan au démarrage
+        def check_update_bg():
+            latest = check_version_github()
+            if latest:
+                GLib.idle_add(lambda: show_update_dialog(self, latest) if self.get_visible() else None)
+        
+        update_thread = threading.Thread(target=check_update_bg, daemon=True)
+        update_thread.start()
 
         self._nav_btns = {}
         self._custom_box = None
