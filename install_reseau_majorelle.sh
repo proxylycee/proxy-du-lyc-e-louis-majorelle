@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.16.4"   # ← changer uniquement ici pour toute la version
+VERSION="0.17.0"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -254,7 +254,7 @@ echo "→ Génération de l'application..."
 cat > "$APP_FILE" <<PYEOF
 #!/usr/bin/env python3
 # ═══════════════════════════════════════════════════════════════════
-#  Réseau Louis Majorelle v0.16.4
+#  Réseau Louis Majorelle v0.17.0
 # ═══════════════════════════════════════════════════════════════════
 
 import gi
