@@ -1327,19 +1327,37 @@ def scan_system_desktops():
 # ═══════════════════════════════════════════════════════════════════
 #  VÉRIFICATION DE VERSION GitHub
 # ═══════════════════════════════════════════════════════════════════
+def _build_url_opener():
+    """Construit un opener urllib avec proxy si besoin."""
+    proxies = {}
+    for env_name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"):
+        value = os.environ.get(env_name)
+        if value:
+            proxies[env_name.lower().replace("_proxy", "")] = value
+    if not proxies and _DEFAULT_PROXY_HOST and _DEFAULT_PROXY_PORT:
+        proxy_url = f"http://{_DEFAULT_PROXY_HOST}:{_DEFAULT_PROXY_PORT}"
+        proxies = {"http": proxy_url, "https": proxy_url}
+    if proxies:
+        return urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
+    return urllib.request.build_opener()
+
+def _version_tuple(version):
+    return tuple(int(part) for part in version.split('.') if part.isdigit())
+
 def check_version_github():
     """Vérifier s'il y a une nouvelle version disponible sur GitHub"""
     try:
-        # Récupère les dernières releases depuis l'API GitHub
         url = "https://api.github.com/repos/proxylycee/proxy-du-lyc-e-louis-majorelle/releases/latest"
         req = urllib.request.Request(url, headers={'Accept': 'application/vnd.github.v3+json'})
-        with urllib.request.urlopen(req, timeout=5) as response:
+        opener = _build_url_opener()
+        with opener.open(req, timeout=10) as response:
             data = json.loads(response.read().decode())
-            latest_version = data.get('tag_name', '').lstrip('v')  # Récupère et nettoie le tag
+            latest_version = data.get('tag_name', '').lstrip('v')
             
-            if latest_version and latest_version != APP_VERSION:
+            if latest_version and _version_tuple(latest_version) > _version_tuple(APP_VERSION):
                 log(f"Nouvelle version disponible: v{latest_version} (actuelle: v{APP_VERSION})")
                 return latest_version, data
+            log(f"Aucune mise à jour disponible. Version actuelle: v{APP_VERSION}", "debug")
     except Exception as e:
         log(f"Impossible de vérifier la version GitHub: {e}", "debug")
     return None, None
@@ -1364,7 +1382,8 @@ def download_update(latest_version, release_data):
         log(f"Téléchargement de la nouvelle version depuis: {download_url}")
         
         req = urllib.request.Request(download_url)
-        with urllib.request.urlopen(req, timeout=10) as response:
+        opener = _build_url_opener()
+        with opener.open(req, timeout=15) as response:
             new_script_content = response.read().decode('utf-8')
         
         # Sauvegarder le script actuel comme backup
