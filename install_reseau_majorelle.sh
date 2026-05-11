@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.16.1"   # ← changer uniquement ici pour toute la version
+VERSION="0.16.3"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -254,7 +254,7 @@ echo "→ Génération de l'application..."
 cat > "$APP_FILE" <<PYEOF
 #!/usr/bin/env python3
 # ═══════════════════════════════════════════════════════════════════
-#  Réseau Louis Majorelle v0.16.1
+#  Réseau Louis Majorelle v0.16.3
 # ═══════════════════════════════════════════════════════════════════
 
 import gi
@@ -1339,33 +1339,131 @@ def check_version_github():
             
             if latest_version and latest_version != APP_VERSION:
                 log(f"Nouvelle version disponible: v{latest_version} (actuelle: v{APP_VERSION})")
-                return latest_version
+                return latest_version, data
     except Exception as e:
         log(f"Impossible de vérifier la version GitHub: {e}", "debug")
-    return None
+    return None, None
 
-def show_update_dialog(parent, latest_version):
-    """Affiche une boîte de dialogue pour notifier une nouvelle version"""
+def download_update(latest_version, release_data):
+    """Télécharge et applique la mise à jour automatiquement"""
+    try:
+        # Trouver l'asset du script d'installation
+        assets = release_data.get('assets', [])
+        script_asset = None
+        for asset in assets:
+            if asset['name'] == 'install_reseau_majorelle.sh':
+                script_asset = asset
+                break
+        
+        if not script_asset:
+            log("Asset du script d'installation non trouvé", "error")
+            return False
+            
+        # Télécharger le nouveau script
+        download_url = script_asset['browser_download_url']
+        log(f"Téléchargement de la nouvelle version depuis: {download_url}")
+        
+        req = urllib.request.Request(download_url)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            new_script_content = response.read().decode('utf-8')
+        
+        # Sauvegarder le script actuel comme backup
+        backup_path = os.path.join(INSTALL_DIR, f"majorelle_backup_v{APP_VERSION}.sh")
+        current_script_path = os.path.join(INSTALL_DIR, "install_reseau_majorelle.sh")
+        
+        if os.path.exists(current_script_path):
+            shutil.copy2(current_script_path, backup_path)
+            log(f"Backup créé: {backup_path}")
+        
+        # Écrire le nouveau script
+        with open(current_script_path, 'w', encoding='utf-8') as f:
+            f.write(new_script_content)
+        
+        # Rendre exécutable
+        os.chmod(current_script_path, 0o755)
+        
+        log(f"Mise à jour vers v{latest_version} téléchargée avec succès")
+        return True
+        
+    except Exception as e:
+        log(f"Erreur lors du téléchargement de la mise à jour: {e}", "error")
+        return False
+
+def show_update_dialog(parent, latest_version, release_data):
+    """Affiche une boîte de dialogue pour notifier une nouvelle version avec option de mise à jour auto"""
     dialog = Gtk.MessageDialog(
         parent=parent,
         flags=Gtk.DialogFlags.MODAL,
         message_type=Gtk.MessageType.INFO,
-        buttons=Gtk.ButtonsType.OK_CANCEL,
+        buttons=Gtk.ButtonsType.NONE,
         text="Nouvelle version disponible"
     )
+    
+    # Ajouter des boutons personnalisés
+    dialog.add_button("Plus tard", Gtk.ResponseType.CANCEL)
+    dialog.add_button("Mettre à jour maintenant", Gtk.ResponseType.OK)
+    
     dialog.format_secondary_text(
         f"Une nouvelle version (v{latest_version}) est disponible.\n\n"
         f"Version actuelle: v{APP_VERSION}\n\n"
-        "Vous pouvez la télécharger depuis:\n"
-        "https://github.com/proxylycee/proxy-du-lyc-e-louis-majorelle/releases"
+        "L'application peut se mettre à jour automatiquement et redémarrer."
     )
     dialog.set_title("Mise à jour disponible")
+    
     response = dialog.run()
+    dialog.destroy()
+    
     if response == Gtk.ResponseType.OK:
-        # Optionnel: ouvrir le lien
-        try:
-            subprocess.Popen(['xdg-open', 'https://github.com/proxylycee/proxy-du-lyc-e-louis-majorelle/releases'])
-        except: pass
+        # Lancer la mise à jour automatique
+        def update_and_restart():
+            success = download_update(latest_version, release_data)
+            if success:
+                GLib.idle_add(show_restart_dialog, parent)
+            else:
+                GLib.idle_add(show_error_dialog, parent)
+        
+        update_thread = threading.Thread(target=update_and_restart)
+        update_thread.start()
+    
+    return response
+
+def show_restart_dialog(parent):
+    """Demande à l'utilisateur de redémarrer l'application"""
+    dialog = Gtk.MessageDialog(
+        parent=parent,
+        flags=Gtk.DialogFlags.MODAL,
+        message_type=Gtk.MessageType.INFO,
+        buttons=Gtk.ButtonsType.OK,
+        text="Mise à jour terminée"
+    )
+    dialog.format_secondary_text(
+        "La mise à jour a été installée avec succès.\n\n"
+        "L'application va maintenant redémarrer pour appliquer les changements."
+    )
+    dialog.set_title("Redémarrage nécessaire")
+    dialog.run()
+    dialog.destroy()
+    
+    # Redémarrer l'application
+    log("Redémarrage de l'application...")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+def show_error_dialog(parent):
+    """Affiche une erreur de mise à jour"""
+    dialog = Gtk.MessageDialog(
+        parent=parent,
+        flags=Gtk.DialogFlags.MODAL,
+        message_type=Gtk.MessageType.ERROR,
+        buttons=Gtk.ButtonsType.OK,
+        text="Erreur de mise à jour"
+    )
+    dialog.format_secondary_text(
+        "Impossible de télécharger la mise à jour automatiquement.\n\n"
+        "Vous pouvez la télécharger manuellement depuis:\n"
+        "https://github.com/proxylycee/proxy-du-lyc-e-louis-majorelle/releases"
+    )
+    dialog.set_title("Erreur")
+    dialog.run()
     dialog.destroy()
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1393,9 +1491,9 @@ class App(Gtk.Window):
 
         # Vérifier les mises à jour en arrière-plan au démarrage
         def check_update_bg():
-            latest = check_version_github()
-            if latest:
-                GLib.idle_add(lambda: show_update_dialog(self, latest) if self.get_visible() else None)
+            latest, release_data = check_version_github()
+            if latest and release_data:
+                GLib.idle_add(lambda: show_update_dialog(self, latest, release_data) if self.get_visible() else None)
         
         update_thread = threading.Thread(target=check_update_bg, daemon=True)
         update_thread.start()
