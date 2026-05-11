@@ -1485,6 +1485,23 @@ def show_error_dialog(parent):
     dialog.run()
     dialog.destroy()
 
+def show_no_update_dialog(parent):
+    """Affiche une boîte de dialogue quand l'application est déjà à jour"""
+    dialog = Gtk.MessageDialog(
+        parent=parent,
+        flags=Gtk.DialogFlags.MODAL,
+        message_type=Gtk.MessageType.INFO,
+        buttons=Gtk.ButtonsType.OK,
+        text="Aucune mise à jour disponible"
+    )
+    dialog.format_secondary_text(
+        f"Vous utilisez déjà la dernière version : v{APP_VERSION}.\n\n"
+        "Aucune action supplémentaire n'est nécessaire."
+    )
+    dialog.set_title("Mise à jour")
+    dialog.run()
+    dialog.destroy()
+
 # ═══════════════════════════════════════════════════════════════════
 #  INTERFACE
 # ═══════════════════════════════════════════════════════════════════
@@ -2212,6 +2229,12 @@ class App(Gtk.Window):
             info.pack_start(row,False,False,0)
         outer.pack_start(info,False,False,0)
 
+        btn_update = Gtk.Button(label="🔄 Mettre à jour l'application")
+        btn_update.get_style_context().add_class("btn-accent")
+        btn_update.set_halign(Gtk.Align.START)
+        btn_update.connect("clicked", lambda _: threading.Thread(target=self._manual_update, daemon=True).start())
+        outer.pack_start(btn_update, False, False, 10)
+
         # ── Graphique trafic réseau ──
         outer.pack_start(self._section("Trafic réseau"), False, False, 0)
         self._net_init()
@@ -2219,6 +2242,13 @@ class App(Gtk.Window):
 
         self._refresh_dash()
         return self._scrolled(outer)
+
+    def _manual_update(self):
+        latest, release_data = check_version_github()
+        if latest and release_data:
+            GLib.idle_add(lambda: show_update_dialog(self, latest, release_data) if self.get_visible() else None)
+        else:
+            GLib.idle_add(show_no_update_dialog, self)
 
     def _refresh_dash(self):
         if not hasattr(self,"_dash"): return
