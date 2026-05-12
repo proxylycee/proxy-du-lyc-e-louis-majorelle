@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.18.8"   # ← changer uniquement ici pour toute la version
+VERSION="0.19.0"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -1434,6 +1434,18 @@ def download_update(latest_version, release_data):
         
         log(f"Mise à jour vers v{latest_version} téléchargée avec succès")
 
+        # Préparer la commande de lancement du script d'installation.
+        # On essaie d'utiliser pkexec pour afficher une demande de mot de passe
+        # dans l'environnement graphique si disponible.
+        bash_path = shutil.which("bash") or "/bin/bash"
+        pkexec_path = shutil.which("pkexec")
+        if pkexec_path:
+            log("La mise à jour va demander des droits administrateur (sudo).")
+            runner_cmd = f'"{pkexec_path}" "{bash_path}" "{current_script_path}"'
+        else:
+            log("pkexec introuvable : la mise à jour sera lancée sans interface d'élévation.")
+            runner_cmd = f'"{bash_path}" "{current_script_path}"'
+
         # Exécuter le script d'installation pour appliquer réellement la mise à jour.
         # On utilise un script wrapper intermédiaire : il attend que majorelle.py
         # se termine, lance l'installateur, puis relance l'application.
@@ -1445,7 +1457,7 @@ def download_update(latest_version, release_data):
             f.write(f"""#!/usr/bin/env bash
 # Wrapper de mise à jour automatique — généré par Majorelle
 sleep 1   # laisser le temps à majorelle.py de se terminer proprement
-bash "{current_script_path}"
+{runner_cmd}
 EXIT_CODE=$?
 rm -f "{wrapper}"   # nettoyage
 if [ $EXIT_CODE -eq 0 ]; then
@@ -1487,7 +1499,8 @@ def show_update_dialog(parent, latest_version, release_data):
     dialog.format_secondary_text(
         f"Une nouvelle version (v{latest_version}) est disponible.\n\n"
         f"Version actuelle: v{APP_VERSION}\n\n"
-        "L'application peut se mettre à jour automatiquement et redémarrer."
+        "L'application peut se mettre à jour automatiquement et redémarrer.\n"
+        "Une demande de mot de passe administrateur pourra être affichée pour appliquer la mise à jour."
     )
     dialog.set_title("Mise à jour disponible")
     
