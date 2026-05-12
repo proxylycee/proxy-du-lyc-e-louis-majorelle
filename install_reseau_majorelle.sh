@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.18.5"   # ← changer uniquement ici pour toute la version
+VERSION="0.18.6"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -22,7 +22,14 @@ echo "  Python : $(python3 --version 2>&1)"
 echo "══════════════════════════════════════════════"
 
 # Capturer les erreurs avec leur contexte
-trap 'echo ""; echo "❌ ERREUR ligne $LINENO — commande : $BASH_COMMAND"; echo "   → Voir le log complet : $LOG_FILE"' ERR
+# (SUDO_KEEPALIVE_PID sera défini plus bas — on le référence ici par variable)
+trap '
+    [[ -n "$SUDO_KEEPALIVE_PID" ]] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
+    echo ""
+    echo "❌ ERREUR ligne $LINENO — commande : $BASH_COMMAND"
+    echo "   → Voir le log complet : $LOG_FILE"
+' ERR
+trap '[[ -n "$SUDO_KEEPALIVE_PID" ]] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null' EXIT
 
 PROXY_HOST="172.19.255.254"
 PROXY_PORT="3128"
@@ -170,6 +177,19 @@ else
 fi
 PROXY_URL="http://$PROXY_HOST:$PROXY_PORT"
 
+# ── Authentification sudo anticipée ─────────────────────────────────
+# On demande le mot de passe une seule fois ici, avant toute commande sudo,
+# puis on maintient le ticket actif pendant toute la durée du script.
+echo "→ Authentification sudo (requise pour l'installation système)..."
+if ! sudo -v; then
+    echo "❌ Impossible d'obtenir les droits sudo — abandon."
+    exit 1
+fi
+echo "  ✅ Droits sudo obtenus"
+# Keepalive : relance sudo toutes les 55 s tant que ce script tourne
+( while kill -0 $$ 2>/dev/null; do sudo -n true; sleep 55; done ) &
+SUDO_KEEPALIVE_PID=$!
+
 # ── 4. Icône SVG ────────────────────────────────────────────────────
 cat > "$ICON_FILE" <<'SVGEOF'
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
@@ -315,6 +335,7 @@ CERT_DIR    = os.path.join(CONFIG_DIR, "certs")
 os.makedirs(CERT_DIR, exist_ok=True)
 CONFIG_FILE    = os.path.join(CONFIG_DIR, "config.json")
 PROFILES_FILE  = os.path.join(CONFIG_DIR, "profiles.json")
+SNOOZE_FILE    = os.path.join(CONFIG_DIR, "update_snooze")   # "Plus tard" : skip au prochain lancement
 LOCAL_APPS     = os.path.expanduser("~/.local/share/applications")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/$APP_ID.desktop")
 os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -1482,6 +1503,14 @@ def show_update_dialog(parent, latest_version, release_data):
         
         update_thread = threading.Thread(target=update_and_restart)
         update_thread.start()
+    else:
+        # "Plus tard" — ne pas reposer la question lors de ce lancement ;
+        # le fichier snooze sera supprimé au prochain lancement avant de ré-afficher.
+        try:
+            with open(SNOOZE_FILE, "w") as _f:
+                _f.write(latest_version)
+        except Exception:
+            pass
     
     return response
 
@@ -1568,6 +1597,14 @@ class App(Gtk.Window):
         def check_update_bg():
             latest, release_data = check_version_github()
             if latest and release_data:
+                # Vérifier si l'utilisateur a cliqué "Plus tard" au lancement précédent
+                if os.path.exists(SNOOZE_FILE):
+                    try:
+                        os.remove(SNOOZE_FILE)
+                    except Exception:
+                        pass
+                    log("Mise à jour disponible mais snooze actif — dialog ignoré ce lancement.")
+                    return
                 GLib.idle_add(lambda: show_update_dialog(self, latest, release_data) if self.get_visible() else None)
         
         update_thread = threading.Thread(target=check_update_bg, daemon=True)
