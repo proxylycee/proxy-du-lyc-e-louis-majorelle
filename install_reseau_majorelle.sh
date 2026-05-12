@@ -1461,7 +1461,7 @@ sleep 1   # laisser le temps à majorelle.py de se terminer proprement
 EXIT_CODE=$?
 rm -f "{wrapper}"   # nettoyage
 if [ $EXIT_CODE -eq 0 ]; then
-    python3 "{app_file}" &
+    nohup python3 "{app_file}" >/dev/null 2>&1 &
 fi
 """)
         os.chmod(wrapper, 0o755)
@@ -1499,7 +1499,7 @@ def show_update_dialog(parent, latest_version, release_data):
     dialog.format_secondary_text(
         f"Une nouvelle version (v{latest_version}) est disponible.\n\n"
         f"Version actuelle: v{APP_VERSION}\n\n"
-        "L'application peut se mettre à jour automatiquement et redémarrer.\n"
+        "L'application peut se mettre à jour automatiquement, redémarrer et se rouvrir.\n"
         "Une demande de mot de passe administrateur pourra être affichée pour appliquer la mise à jour."
     )
     dialog.set_title("Mise à jour disponible")
