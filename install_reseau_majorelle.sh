@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.18.4"   # ← changer uniquement ici pour toute la version
+VERSION="0.18.5"   # ← changer uniquement ici pour toute la version
 
 set -e
 
