@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.18.7"   # ← changer uniquement ici pour toute la version
+VERSION="0.18.8"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -181,7 +181,9 @@ PROXY_URL="http://$PROXY_HOST:$PROXY_PORT"
 # On demande le mot de passe une seule fois ici, avant toute commande sudo,
 # puis on maintient le ticket actif pendant toute la durée du script.
 echo "→ Authentification sudo (requise pour l'installation système)..."
-if ! sudo -v; then
+# </dev/tty 2>/dev/tty : force sudo à afficher le prompt et lire le mdp
+# sur le vrai terminal, même quand stdout/stderr sont redirigés vers tee.
+if ! sudo -v </dev/tty 2>/dev/tty; then
     echo "❌ Impossible d'obtenir les droits sudo — abandon."
     exit 1
 fi
