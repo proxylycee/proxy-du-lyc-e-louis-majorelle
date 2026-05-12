@@ -4,7 +4,7 @@
 #  Compatible : toutes versions Ubuntu · Fedora · Arch · openSUSE…
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION="0.17.0"   # ← changer uniquement ici pour toute la version
+VERSION="0.18.3"   # ← changer uniquement ici pour toute la version
 
 set -e
 
@@ -232,17 +232,25 @@ cp "$ICON_FILE" "$ICON_DIR/$ICON_NAME.svg"
 sudo mkdir -p "$SYS_ICON_DIR_SVG" "$SYS_ICON_DIR_48" "$SYS_ICON_DIR_256"
 sudo cp "$ICON_FILE" "$SYS_ICON_DIR_SVG/$ICON_NAME.svg"
 
-# Convertir le SVG en PNG 48x48 et 256x256 si rsvg-convert ou inkscape disponible
-if command -v rsvg-convert &>/dev/null; then
-    rsvg-convert -w 48  -h 48  "$ICON_FILE" | sudo tee "$SYS_ICON_DIR_48/$ICON_NAME.png"  >/dev/null
-    rsvg-convert -w 256 -h 256 "$ICON_FILE" | sudo tee "$SYS_ICON_DIR_256/$ICON_NAME.png" >/dev/null
-elif command -v inkscape &>/dev/null; then
-    inkscape "$ICON_FILE" -w 48  -h 48  -o /tmp/majorelle_48.png  2>/dev/null && sudo mv /tmp/majorelle_48.png  "$SYS_ICON_DIR_48/$ICON_NAME.png"
-    inkscape "$ICON_FILE" -w 256 -h 256 -o /tmp/majorelle_256.png 2>/dev/null && sudo mv /tmp/majorelle_256.png "$SYS_ICON_DIR_256/$ICON_NAME.png"
-elif command -v convert &>/dev/null; then
-    convert -background none "$ICON_FILE" -resize 48x48   /tmp/majorelle_48.png  2>/dev/null && sudo mv /tmp/majorelle_48.png  "$SYS_ICON_DIR_48/$ICON_NAME.png"
-    convert -background none "$ICON_FILE" -resize 256x256 /tmp/majorelle_256.png 2>/dev/null && sudo mv /tmp/majorelle_256.png "$SYS_ICON_DIR_256/$ICON_NAME.png"
-fi
+# Convertir le SVG en PNG 48x48 et 256x256 si rsvg-convert, inkscape ou convert disponible
+_convert_icon() {
+    local size="$1" dst="$2"
+    local tmp="/tmp/majorelle_${size}.png"
+    rm -f "$tmp"
+    if command -v rsvg-convert &>/dev/null; then
+        rsvg-convert -w "$size" -h "$size" "$ICON_FILE" -o "$tmp" 2>/dev/null || true
+    elif command -v inkscape &>/dev/null; then
+        # inkscape 1.x utilise --export-filename ; inkscape 0.x utilise -e
+        inkscape "$ICON_FILE" --export-filename="$tmp" -w "$size" -h "$size" 2>/dev/null             || inkscape "$ICON_FILE" -e "$tmp" -w "$size" -h "$size" 2>/dev/null             || true
+    elif command -v convert &>/dev/null; then
+        convert -background none "$ICON_FILE" -resize "${size}x${size}" "$tmp" 2>/dev/null || true
+    fi
+    if [[ -f "$tmp" ]]; then
+        sudo mv "$tmp" "$dst" 2>/dev/null || true
+    fi
+}
+_convert_icon 48  "$SYS_ICON_DIR_48/$ICON_NAME.png"
+_convert_icon 256 "$SYS_ICON_DIR_256/$ICON_NAME.png"
 
 # Mettre à jour le cache d'icônes système
 sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
@@ -1363,7 +1371,7 @@ def check_version_github():
     return None, None
 
 def download_update(latest_version, release_data):
-    """Télécharge et applique la mise à jour automatiquement"""
+    """Télécharge, exécute le script d'installation et redémarre l'application"""
     try:
         # Trouver l'asset du script d'installation
         assets = release_data.get('assets', [])
@@ -1402,6 +1410,37 @@ def download_update(latest_version, release_data):
         os.chmod(current_script_path, 0o755)
         
         log(f"Mise à jour vers v{latest_version} téléchargée avec succès")
+
+        # Exécuter le script d'installation pour appliquer réellement la mise à jour.
+        # On utilise un script wrapper intermédiaire : il attend que majorelle.py
+        # se termine, lance l'installateur, puis relance l'application.
+        # Cela contourne le problème "impossible de remplacer un fichier en cours
+        # d'utilisation" propre aux scripts bash auto-mis à jour.
+        wrapper = os.path.join(INSTALL_DIR, "_update_runner.sh")
+        app_file = os.path.join(INSTALL_DIR, "majorelle.py")
+        with open(wrapper, 'w', encoding='utf-8') as f:
+            f.write(f"""#!/usr/bin/env bash
+# Wrapper de mise à jour automatique — généré par Majorelle
+sleep 1   # laisser le temps à majorelle.py de se terminer proprement
+bash "{current_script_path}"
+EXIT_CODE=$?
+rm -f "{wrapper}"   # nettoyage
+if [ $EXIT_CODE -eq 0 ]; then
+    python3 "{app_file}" &
+fi
+""")
+        os.chmod(wrapper, 0o755)
+
+        # Lancer le wrapper en arrière-plan, détaché du processus Python courant
+        subprocess.Popen(
+            ["bash", wrapper],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
+        log("Redémarrage de l'application...")
         return True
         
     except Exception as e:
@@ -1447,25 +1486,25 @@ def show_update_dialog(parent, latest_version, release_data):
     return response
 
 def show_restart_dialog(parent):
-    """Demande à l'utilisateur de redémarrer l'application"""
+    """Informe l'utilisateur que la mise à jour est en cours et ferme l'application"""
     dialog = Gtk.MessageDialog(
         parent=parent,
         flags=Gtk.DialogFlags.MODAL,
         message_type=Gtk.MessageType.INFO,
         buttons=Gtk.ButtonsType.OK,
-        text="Mise à jour terminée"
+        text="Mise à jour en cours…"
     )
     dialog.format_secondary_text(
-        "La mise à jour a été installée avec succès.\n\n"
-        "L'application va maintenant redémarrer pour appliquer les changements."
+        "Le script d'installation va s'exécuter en arrière-plan.\n\n"
+        "L'application redémarrera automatiquement une fois la mise à jour terminée."
     )
-    dialog.set_title("Redémarrage nécessaire")
+    dialog.set_title("Redémarrage")
     dialog.run()
     dialog.destroy()
-    
-    # Redémarrer l'application
-    log("Redémarrage de l'application...")
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    # Quitter proprement — le wrapper _update_runner.sh relancera l'app
+    log("Fermeture pour laisser le wrapper appliquer la mise à jour...")
+    Gtk.main_quit()
 
 def show_error_dialog(parent):
     """Affiche une erreur de mise à jour"""
@@ -3909,6 +3948,47 @@ if [ ! -f "$SUDOERS_GIT" ]; then
         | sudo tee "$SUDOERS_GIT" > /dev/null
     sudo chmod 440 "$SUDOERS_GIT"
     echo "  ✅ sudo préservation proxy configurée (sudoers.d)"
+fi
+
+# ── 9b. VS Code — proxy (Copilot + push GitHub) ─────────────────────
+echo "→ Configuration VS Code (proxy Copilot + push GitHub)..."
+VSCODE_SETTINGS_DIR="$HOME/.config/Code/User"
+VSCODE_SETTINGS_FILE="$VSCODE_SETTINGS_DIR/settings.json"
+
+if command -v code &>/dev/null || [ -d "$VSCODE_SETTINGS_DIR" ]; then
+    mkdir -p "$VSCODE_SETTINGS_DIR"
+    if [ -f "$VSCODE_SETTINGS_FILE" ] && \
+       python3 -c "import json; json.load(open('$VSCODE_SETTINGS_FILE'))" &>/dev/null; then
+        # Injecter dans le settings.json existant sans écraser les autres préférences
+        python3 - <<PYEOF
+import json
+path = "$VSCODE_SETTINGS_FILE"
+with open(path, "r", encoding="utf-8") as f:
+    s = json.load(f)
+s["http.proxy"]          = "$PROXY_URL"
+s["http.proxyStrictSSL"] = False
+s["http.proxySupport"]   = "override"
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(s, f, indent=4, ensure_ascii=False)
+PYEOF
+        echo "  ✅ settings.json VS Code mis à jour (proxy Copilot + extensions)"
+    else
+        cat > "$VSCODE_SETTINGS_FILE" <<VSEOF
+{
+    "http.proxy": "$PROXY_URL",
+    "http.proxyStrictSSL": false,
+    "http.proxySupport": "override"
+}
+VSEOF
+        echo "  ✅ settings.json VS Code créé (proxy Copilot + extensions)"
+    fi
+
+    # git : s'assurer que github.com passe bien par le proxy
+    # (VS Code appelle git directement pour les push/pull)
+    git config --global http.https://github.com.proxy "$PROXY_URL"
+    echo "  ✅ git : github.com forcé via proxy (push VS Code)"
+else
+    echo "  ℹ️  VS Code non détecté — configuration ignorée"
 fi
 
 # ── 10. Snap ─────────────────────────────────────────────────────────
