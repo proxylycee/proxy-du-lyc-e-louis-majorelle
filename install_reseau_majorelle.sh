@@ -3966,8 +3966,8 @@ echo "→ Configuration Git (proxy réseau lycée)..."
 # Config globale git
 git config --global http.proxy  "$PROXY_URL"
 git config --global https.proxy "$PROXY_URL"
-# Pas de proxy pour localhost/intranet
-git config --global no_proxy    "localhost,127.0.0.1,172.19.0.0/16,192.168.0.0/16"
+# Pas de proxy pour localhost/intranet : git utilise plutôt les variables d'environnement NO_PROXY
+# (la clé git config --global no_proxy n'existe pas et provoque une erreur).
 echo "  ✅ git config --global http(s).proxy configuré"
 
 # Variables d'environnement persistantes dans le profil shell
